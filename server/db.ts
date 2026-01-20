@@ -1,12 +1,7 @@
 import mysql from 'mysql2/promise';
 import { ENV } from './_core/env';
 
-// inlined/shared-typing (prevents "Cannot find module '@shared'")
-/**
- * NOTE: these are minimal/type-safe shapes used by db.ts — keep in sync with
- * the real shared types in your monorepo/package (or replace with a proper
- * relative import to the shared package).
- */
+
 type Nullable<T> = T | null;
 
 interface InsertUser {

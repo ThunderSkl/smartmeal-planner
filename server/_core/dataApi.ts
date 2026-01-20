@@ -6,6 +6,10 @@
  */
 import { ENV } from "./env";
 
+import fetch from 'node-fetch';
+
+const apiKey = process.env.DEEPSEEK_API_KEY;
+
 export type DataApiCallOptions = {
   query?: Record<string, unknown>;
   body?: Record<string, unknown>;

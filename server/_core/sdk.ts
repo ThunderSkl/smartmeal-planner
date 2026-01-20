@@ -7,9 +7,9 @@ import { SignJWT, jwtVerify } from "jose";
 import * as db from "../db";
 import { ENV } from "./env";
 
-// Local User type (keeps this module independent from the missing `@shared` package)
-// Fields are aligned with how this file reads/writes user records.
+
 type User = {
+  role: string;
   openId: string;
   name: string | null;
   email?: string | null;
@@ -313,6 +313,7 @@ class SDKServer {
       email: user.email ?? null,
       loginMethod: user.loginMethod ?? null,
       lastSignedIn: user.lastSignedIn ?? null,
+      role: ""
     };
 
     return normalizedUser;
