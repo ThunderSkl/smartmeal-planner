@@ -39,8 +39,9 @@ export function registerOAuthRoutes(app: Express) {
         lastSignedIn: new Date(),
       });
 
+      const safeName = userInfo.name || userInfo.email?.split('@')[0] || userInfo.openId;
       const sessionToken = await sdk.createSessionToken(userInfo.openId, {
-        name: userInfo.name || "",
+        name: safeName,
         expiresInMs: ONE_YEAR_MS,
       });
 
@@ -95,7 +96,8 @@ export function registerOAuthRoutes(app: Express) {
         lastSignedIn: new Date(),
       });
 
-      const sessionToken = await sdk.createSessionToken(openId, { name: name ?? "", expiresInMs: ONE_YEAR_MS });
+      const safeName = name || (email ? String(email).split('@')[0] : openId);
+      const sessionToken = await sdk.createSessionToken(openId, { name: safeName, expiresInMs: ONE_YEAR_MS });
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
 

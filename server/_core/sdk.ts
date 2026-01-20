@@ -4,9 +4,18 @@ import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
-import type { User } from "@shared";
 import * as db from "../db";
 import { ENV } from "./env";
+
+// Local User type (keeps this module independent from the missing `@shared` package)
+// Fields are aligned with how this file reads/writes user records.
+type User = {
+  openId: string;
+  name: string | null;
+  email?: string | null;
+  loginMethod?: string | null;
+  lastSignedIn?: Date | null;
+};
 import type {
   ExchangeTokenRequest,
   ExchangeTokenResponse,
@@ -297,7 +306,16 @@ class SDKServer {
       lastSignedIn: signedInAt,
     });
 
-    return user;
+    // Normalize DB user to this module's local User type (convert undefined -> null)
+    const normalizedUser: User = {
+      openId: user.openId,
+      name: user.name ?? null,
+      email: user.email ?? null,
+      loginMethod: user.loginMethod ?? null,
+      lastSignedIn: user.lastSignedIn ?? null,
+    };
+
+    return normalizedUser;
   }
 }
 

@@ -10,3 +10,16 @@ export const ENV = {
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
   deepseekApiKey: process.env.DEEPSEEK_API_KEY ?? "",
 };
+
+// Fail-fast / helpful dev message when critical auth env vars are missing.
+// Tests set JWT_SECRET explicitly, so we only warn/throw outside of tests.
+if (!ENV.appId || !ENV.cookieSecret) {
+  const msg = `[ENV] Missing required environment variables: VITE_APP_ID=${ENV.appId ? 'OK' : 'MISSING'} JWT_SECRET=${ENV.cookieSecret ? 'OK' : 'MISSING'}.\n` +
+    "Authentication will fail — set these in your environment or a .env file. See .env.example.";
+  // Always log so developer sees it in console
+  console.error(msg);
+  // In production crash fast. In dev, keep running but clearly warn.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(msg);
+  }
+}

@@ -7,7 +7,22 @@ import { useNavigate } from "react-router-dom";
 import { Loader2, Download, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useState } from "react";
-import type { ShoppingItem, ShoppingList } from "@shared";
+
+type ShoppingItem = {
+  id?: number | string;
+  name: string;
+  category: string;
+  quantity: number;
+  unit: string;
+  checked: boolean;
+  estimatedCost?: number;
+};
+
+type ShoppingList = {
+  id: number;
+  items: ShoppingItem[];
+  name?: string;
+};
 
 export default function ShoppingListView() {
   const { isAuthenticated } = useAuth();
@@ -50,7 +65,8 @@ export default function ShoppingListView() {
   const handleExportList = () => {
     if (!shoppingList) return;
 
-    const grouped = shoppingList.items.reduce(
+    const items = shoppingList.items as ShoppingItem[];
+    const grouped = items.reduce(
       (acc, item) => {
         if (!acc[item.category]) {
           acc[item.category] = [];
@@ -125,18 +141,19 @@ export default function ShoppingListView() {
   }
 
   // Group items by category
-  const grouped = shoppingList.items.reduce(
-    (acc, item) => {
-      if (!acc[item.category]) {
-        acc[item.category] = [];
-      }
-      acc[item.category].push(item);
-      return acc;
-    },
-    {} as Record<string, ShoppingItem[]>
-  );
-
-  const checkedCount = shoppingList.items.filter((item) => item.checked).length;
+    const items = shoppingList.items as ShoppingItem[];
+    const grouped = items.reduce(
+      (acc, item) => {
+        if (!acc[item.category]) {
+          acc[item.category] = [];
+        }
+        acc[item.category].push(item);
+        return acc;
+      },
+      {} as Record<string, ShoppingItem[]>
+    );
+  
+    const checkedCount = items.filter((item) => item.checked).length;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -150,7 +167,7 @@ export default function ShoppingListView() {
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Listas de Compra</h1>
               <p className="text-gray-600 mt-1">
-                {checkedCount} de {shoppingList.items.length} elementos comprados
+                {checkedCount} de {items.length} elementos comprados
               </p>
             </div>
             <Button
@@ -183,7 +200,7 @@ export default function ShoppingListView() {
                       <Checkbox
                         checked={item.checked}
                         onCheckedChange={() => {
-                          const globalIndex = shoppingList.items.findIndex(
+                          const globalIndex = items.findIndex(
                             (i) => i.name === item.name && i.category === item.category
                           );
                           handleToggleItem(globalIndex);
@@ -203,7 +220,7 @@ export default function ShoppingListView() {
                       <div className="text-sm text-gray-600">
                         {item.quantity} {item.unit}
                       </div>
-                      {item.estimatedCost && (
+                      {item.estimatedCost != null && (
                         <div className="text-sm font-semibold text-gray-900">
                           ${item.estimatedCost.toFixed(2)}
                         </div>
@@ -225,7 +242,7 @@ export default function ShoppingListView() {
             <div className="space-y-2">
               <div className="flex justify-between">
                 <span>Total de elementos:</span>
-                <span className="font-semibold">{shoppingList.items.length}</span>
+                <span className="font-semibold">{items.length}</span>
               </div>
               <div className="flex justify-between">
                 <span>Elementos comprados:</span>
@@ -234,16 +251,16 @@ export default function ShoppingListView() {
               <div className="flex justify-between">
                 <span>Elementos pendientes:</span>
                 <span className="font-semibold text-orange-600">
-                  {shoppingList.items.length - checkedCount}
+                  {items.length - checkedCount}
                 </span>
               </div>
-              {shoppingList.items.some((item) => item.estimatedCost) && (
+              {items.some((item) => item.estimatedCost) && (
                 <div className="flex justify-between pt-2 border-t border-green-200">
                   <span>Costo estimado:</span>
                   <span className="font-semibold">
                     $
-                    {shoppingList.items
-                      .reduce((sum, item) => sum + (item.estimatedCost || 0), 0)
+                    {items
+                      .reduce((sum, item) => sum + (item.estimatedCost ?? 0), 0)
                       .toFixed(2)}
                   </span>
                 </div>

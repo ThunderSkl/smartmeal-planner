@@ -160,7 +160,7 @@ export default function Home() {
             <h1 className="text-2xl font-bold text-gray-900">SmartMeal Planner</h1>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-gray-600">Bienvenido, {user?.name || "Usuario"}</span>
+            <span className="text-gray-600">Bienvenido, {user?.name || user?.email?.split('@')[0] || "Usuario"}</span>
             <Button variant="outline" onClick={() => logout()}>
               Cerrar Sesión
             </Button>

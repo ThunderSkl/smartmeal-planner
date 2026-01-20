@@ -1,16 +1,99 @@
 import mysql from 'mysql2/promise';
 import { ENV } from './_core/env';
-import type {
-  InsertUser,
-  User,
-  UserPreferences,
-  InsertUserPreferences,
-  WeeklyMenu,
-  InsertWeeklyMenu,
-  ShoppingList,
-  InsertShoppingList,
-  ShoppingItem,
-} from '@shared';
+
+// inlined/shared-typing (prevents "Cannot find module '@shared'")
+/**
+ * NOTE: these are minimal/type-safe shapes used by db.ts — keep in sync with
+ * the real shared types in your monorepo/package (or replace with a proper
+ * relative import to the shared package).
+ */
+type Nullable<T> = T | null;
+
+interface InsertUser {
+  openId: string;
+  name?: Nullable<string>;
+  email?: Nullable<string>;
+  role?: string;
+  lastSignedIn?: string | Date;
+  loginMethod?: Nullable<string>;
+}
+
+interface User extends InsertUser {
+  id: number;
+  createdAt: Date;
+  updatedAt: Date;
+  lastSignedIn: Date;
+}
+
+interface UserPreferences {
+  userId: number;
+  allergies: string[];
+  dietaryRestrictions: string[];
+  nutritionalGoals: any[];
+  preferredCuisines: string[];
+  dislikedIngredients: string[];
+  targetCalories: number;
+  targetProtein: number;
+  targetCarbs: number;
+  targetFat: number;
+  mealsPerDay: number;
+  includeSnacks: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+type InsertUserPreferences = Partial<
+  Omit<UserPreferences, 'userId' | 'createdAt' | 'updatedAt'>
+> & { userId?: number };
+
+interface WeeklyMenu {
+  id: number;
+  userId: number;
+  menuData: any;
+  nutritionSummary: any;
+  startDate: Date;
+  isActive: number;
+  notes?: Nullable<string>;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface InsertWeeklyMenu {
+  userId: number;
+  menuData: any;
+  nutritionSummary: any;
+  startDate: string | Date;
+  isActive?: number;
+  notes?: Nullable<string>;
+}
+
+interface ShoppingItem {
+  id: string | number | undefined;
+  category: string;
+  checked: any;
+  estimatedCost: null;
+  name: string;
+  qty?: number;
+  unit?: string;
+  notes?: string;
+}
+
+interface ShoppingList {
+  id: number;
+  weeklyMenuId: number;
+  userId: number;
+  items: ShoppingItem[];
+  isCompleted: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface InsertShoppingList {
+  weeklyMenuId: number;
+  userId: number;
+  items: ShoppingItem[];
+  isCompleted?: number;
+}
 
 let _pool: mysql.Pool | null = null;
 
@@ -52,19 +135,29 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   const lastSignedIn = lastSignedInRaw ? new Date(lastSignedInRaw) : new Date();
   const role = user.role ?? (user.openId === ENV.ownerOpenId ? 'admin' : 'user');
 
+  // Support optional `password` in upsert so callers (register/login) can set it.
   const sql = `
-    INSERT INTO users (openId, name, email, loginMethod, role, lastSignedIn)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO users (openId, name, email, loginMethod, role, password, lastSignedIn)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
       name = VALUES(name),
       email = VALUES(email),
       loginMethod = VALUES(loginMethod),
       role = VALUES(role),
+      password = IF(VALUES(password) IS NOT NULL, VALUES(password), password),
       lastSignedIn = VALUES(lastSignedIn),
       updatedAt = NOW()
   `;
 
-  await pool.execute(sql, [user.openId, user.name ?? null, user.email ?? null, (user as any).loginMethod ?? null, role, lastSignedIn]);
+  await pool.execute(sql, [
+    user.openId,
+    user.name ?? null,
+    user.email ?? null,
+    (user as any).loginMethod ?? null,
+    role,
+    (user as any).password ?? null,
+    lastSignedIn,
+  ]);
 }
 
 export async function getUserByOpenId(openId: string): Promise<User | undefined> {

@@ -1,4 +1,4 @@
-import { COOKIE_NAME } from "@shared/const";
+import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
@@ -25,13 +25,76 @@ export const appRouter = router({
   
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      return {
-        success: true,
-      } as const;
+      return { success: true } as const;
     }),
+
+    register: publicProcedure
+      .input(z.object({ name: z.string().min(1), email: z.string().email(), password: z.string().min(6) }))
+      .mutation(async ({ ctx, input }) => {
+        const openId = `email:${input.email.toLowerCase()}`;
+        const crypto = await import('crypto');
+        const salt = crypto.randomBytes(8).toString('hex');
+        const hash = crypto.scryptSync(input.password, salt, 64).toString('hex');
+        const stored = `scrypt$${salt}$${hash}`;
+
+        await (await import('./db')).upsertUser({
+          openId,
+          name: input.name,
+          email: input.email.toLowerCase(),
+          loginMethod: 'email',
+          password: stored,
+        });
+
+        const sessionToken = await (await import('./_core/sdk')).sdk.createSessionToken(openId, { name: input.name, expiresInMs: ONE_YEAR_MS });
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+        return { success: true } as const;
+      }),
+
+    login: publicProcedure
+      .input(z.object({ email: z.string().email(), password: z.string().min(1) }))
+      .mutation(async ({ ctx, input }) => {
+        const openId = `email:${input.email.toLowerCase()}`;
+        const db = await import('./db');
+        const user = await db.getUserByOpenId(openId);
+        if (!user) throw new Error('Invalid credentials');
+
+        const stored = (user as any).password;
+        if (!stored) throw new Error('Invalid credentials');
+
+        const crypto = await import('crypto');
+        const parts = (stored as string).split('$');
+        if (parts.length !== 3 || parts[0] !== 'scrypt') throw new Error('Invalid credentials');
+        const salt = parts[1];
+        const expected = parts[2];
+        const derived = crypto.scryptSync(input.password, salt, 64).toString('hex');
+        const ok = crypto.timingSafeEqual(Buffer.from(derived, 'hex'), Buffer.from(expected, 'hex'));
+        if (!ok) throw new Error('Invalid credentials');
+
+        // Ensure the session payload contains a non-empty `name` (some older users may have null).
+        const safeName = user.name ?? user.email?.split('@')[0] ?? user.openId;
+        const sessionToken = await (await import('./_core/sdk')).sdk.createSessionToken(openId, { name: safeName, expiresInMs: ONE_YEAR_MS });
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+        // Return the user (omit password) so the client can update `auth.me` immediately
+        return {
+          success: true,
+          user: {
+            id: user.id,
+            openId: user.openId,
+            name: user.name ?? user.email?.split('@')[0] ?? null,
+            email: user.email ?? null,
+            role: user.role,
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt,
+            lastSignedIn: user.lastSignedIn,
+          },
+        } as const;
+      }),
   }),
 
   // ==================== USER PREFERENCES ====================
