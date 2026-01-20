@@ -1,12 +1,12 @@
 <!doctype html>
 <html lang="en">
-
   <head>
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1" />
-    <title>SmartMeal Planner</title>    
+      content="width=device-width, initial-scale=1.0, maximum-scale=1"
+    />
+    <title>SmartMeal Planner</title>
     <!-- THIS IS THE START OF A COMMENT BLOCK, BLOCK TO BE DELETED: Google Fonts here, example:
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -17,10 +17,19 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script
-      defer
-      src="%VITE_ANALYTICS_ENDPOINT%/umami"
-      data-website-id="%VITE_ANALYTICS_WEBSITE_ID%"></script>
+    <script type="module">
+      // Load Umami analytics only when the VITE env vars are configured.
+      const _ANALYTICS_ENDPOINT = import.meta.env.VITE_ANALYTICS_ENDPOINT || "";
+      const _ANALYTICS_WEBSITE_ID =
+        import.meta.env.VITE_ANALYTICS_WEBSITE_ID || "";
+      if (_ANALYTICS_ENDPOINT && _ANALYTICS_WEBSITE_ID) {
+        const endpoint = _ANALYTICS_ENDPOINT.replace(/\/$/, "");
+        const s = document.createElement("script");
+        s.defer = true;
+        s.src = `${endpoint}/umami`;
+        s.setAttribute("data-website-id", _ANALYTICS_WEBSITE_ID);
+        document.head.appendChild(s);
+      }
+    </script>
   </body>
-
 </html>

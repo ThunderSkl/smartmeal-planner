@@ -17,7 +17,7 @@ import {
   getShoppingListByMenuId,
   updateShoppingList,
 } from "./db";
-import type { DayMenu, NutritionSummary, ShoppingItem } from "../drizzle/schema";
+import type { DayMenu, NutritionSummary, ShoppingItem } from "@shared";
 
 export const appRouter = router({
   system: systemRouter,

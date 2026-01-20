@@ -82,6 +82,17 @@ export function ManusDialog({
           >
             Login with Manus
           </Button>
+
+          {/* Dev-only: open client-side /login directly for local testing */}
+          {import.meta.env.DEV ? (
+            <Button
+              variant="ghost"
+              onClick={() => (window.location.href = "/login")}
+              className="w-full mt-3 text-sm"
+            >
+              Open client /login (dev)
+            </Button>
+          ) : null}
         </DialogFooter>
       </DialogContent>
     </Dialog>

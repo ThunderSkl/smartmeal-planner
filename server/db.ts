@@ -1,287 +1,349 @@
-import { eq, and } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, userPreferences, weeklyMenus, shoppingLists, type InsertUserPreferences, type InsertWeeklyMenu, type InsertShoppingList } from "../drizzle/schema";
+import mysql from 'mysql2/promise';
 import { ENV } from './_core/env';
+import type {
+  InsertUser,
+  User,
+  UserPreferences,
+  InsertUserPreferences,
+  WeeklyMenu,
+  InsertWeeklyMenu,
+  ShoppingList,
+  InsertShoppingList,
+  ShoppingItem,
+} from '@shared';
 
-let _db: ReturnType<typeof drizzle> | null = null;
+let _pool: mysql.Pool | null = null;
 
-// Lazily create the drizzle instance so local tooling can run without a DB.
-export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
-    try {
-      _db = drizzle(process.env.DATABASE_URL);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
-      _db = null;
-    }
+async function getPool() {
+  if (_pool) return _pool;
+  const uri = process.env.DATABASE_URL || ENV.databaseUrl;
+  if (!uri) return null;
+  try {
+    _pool = mysql.createPool({
+      uri,
+      connectionLimit: 5,
+      stringifyObjects: false,
+      decimalNumbers: true,
+    });
+    // quick ping
+    await _pool.query('SELECT 1');
+    return _pool;
+  } catch (err) {
+    console.warn('[Database] connection failed:', String(err));
+    _pool = null;
+    return null;
   }
-  return _db;
 }
 
-export async function upsertUser(user: InsertUser): Promise<void> {
-  if (!user.openId) {
-    throw new Error("User openId is required for upsert");
-  }
+export async function getDb() {
+  return getPool();
+}
 
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot upsert user: database not available");
+// -------------------- USERS --------------------
+export async function upsertUser(user: InsertUser): Promise<void> {
+  if (!user.openId) throw new Error('User openId is required for upsert');
+  const pool = await getPool();
+  if (!pool) {
+    console.warn('[Database] Cannot upsert user: database not available');
     return;
   }
 
-  try {
-    const values: InsertUser = {
-      openId: user.openId,
-    };
-    const updateSet: Record<string, unknown> = {};
+  const lastSignedInRaw = (user as Partial<User> & { lastSignedIn?: string | Date }).lastSignedIn;
+  const lastSignedIn = lastSignedInRaw ? new Date(lastSignedInRaw) : new Date();
+  const role = user.role ?? (user.openId === ENV.ownerOpenId ? 'admin' : 'user');
 
-    const textFields = ["name", "email", "loginMethod"] as const;
-    type TextField = (typeof textFields)[number];
+  const sql = `
+    INSERT INTO users (openId, name, email, loginMethod, role, lastSignedIn)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      name = VALUES(name),
+      email = VALUES(email),
+      loginMethod = VALUES(loginMethod),
+      role = VALUES(role),
+      lastSignedIn = VALUES(lastSignedIn),
+      updatedAt = NOW()
+  `;
 
-    const assignNullable = (field: TextField) => {
-      const value = user[field];
-      if (value === undefined) return;
-      const normalized = value ?? null;
-      values[field] = normalized;
-      updateSet[field] = normalized;
-    };
-
-    textFields.forEach(assignNullable);
-
-    if (user.lastSignedIn !== undefined) {
-      values.lastSignedIn = user.lastSignedIn;
-      updateSet.lastSignedIn = user.lastSignedIn;
-    }
-    if (user.role !== undefined) {
-      values.role = user.role;
-      updateSet.role = user.role;
-    } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
-    }
-
-    if (!values.lastSignedIn) {
-      values.lastSignedIn = new Date();
-    }
-
-    if (Object.keys(updateSet).length === 0) {
-      updateSet.lastSignedIn = new Date();
-    }
-
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
-      set: updateSet,
-    });
-  } catch (error) {
-    console.error("[Database] Failed to upsert user:", error);
-    throw error;
-  }
+  await pool.execute(sql, [user.openId, user.name ?? null, user.email ?? null, (user as any).loginMethod ?? null, role, lastSignedIn]);
 }
 
-export async function getUserByOpenId(openId: string) {
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot get user: database not available");
-    return undefined;
-  }
-
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-
-  return result.length > 0 ? result[0] : undefined;
+export async function getUserByOpenId(openId: string): Promise<User | undefined> {
+  const pool = await getPool();
+  if (!pool) return undefined;
+  const [rows] = await pool.execute<any[]>('SELECT * FROM users WHERE openId = ? LIMIT 1', [openId]);
+  if (!Array.isArray(rows) || rows.length === 0) return undefined;
+  const row = rows[0];
+  return {
+    ...row,
+    createdAt: new Date(row.createdAt),
+    updatedAt: new Date(row.updatedAt),
+    lastSignedIn: new Date(row.lastSignedIn),
+  } as User;
 }
 
-// ==================== USER PREFERENCES ====================
+// -------------------- PREFERENCES --------------------
+export async function getUserPreferences(userId: number): Promise<UserPreferences | undefined> {
+  const pool = await getPool();
+  if (!pool) return undefined;
+  const [rows] = await pool.execute<any[]>('SELECT * FROM userPreferences WHERE userId = ? LIMIT 1', [userId]);
+  if (!Array.isArray(rows) || rows.length === 0) return undefined;
+  const r = rows[0];
+  const parseJsonOrCsv = (v: any) => {
+    if (v == null) return [];
+    if (typeof v === 'object') return v;
+    if (typeof v !== 'string') return [];
+    // Try JSON first, then fall back to legacy CSV (comma-separated values)
+    try {
+      return JSON.parse(v);
+    } catch {
+      if (v.trim() === '') return [];
+      return v.split(',').map((s: string) => s.trim()).filter(Boolean);
+    }
+  };
 
-export async function getUserPreferences(userId: number) {
-  const db = await getDb();
-  if (!db) return undefined;
-
-  const result = await db
-    .select()
-    .from(userPreferences)
-    .where(eq(userPreferences.userId, userId))
-    .limit(1);
-
-  return result.length > 0 ? result[0] : undefined;
+  return {
+    ...r,
+    allergies: parseJsonOrCsv(r.allergies),
+    dietaryRestrictions: parseJsonOrCsv(r.dietaryRestrictions),
+    nutritionalGoals: parseJsonOrCsv(r.nutritionalGoals),
+    preferredCuisines: parseJsonOrCsv(r.preferredCuisines),
+    dislikedIngredients: parseJsonOrCsv(r.dislikedIngredients),
+    createdAt: new Date(r.createdAt),
+    updatedAt: new Date(r.updatedAt),
+  } as UserPreferences;
 }
 
 export async function upsertUserPreferences(userId: number, prefs: Omit<InsertUserPreferences, 'userId'>) {
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot upsert preferences: database not available");
+  const pool = await getPool();
+  if (!pool) {
+    console.warn('[Database] Cannot upsert preferences: database not available');
     return;
   }
 
   const existing = await getUserPreferences(userId);
+  const payload = {
+    allergies: JSON.stringify(prefs.allergies ?? existing?.allergies ?? []),
+    dietaryRestrictions: JSON.stringify(prefs.dietaryRestrictions ?? existing?.dietaryRestrictions ?? []),
+    nutritionalGoals: JSON.stringify(prefs.nutritionalGoals ?? existing?.nutritionalGoals ?? []),
+    preferredCuisines: JSON.stringify(prefs.preferredCuisines ?? existing?.preferredCuisines ?? []),
+    dislikedIngredients: JSON.stringify(prefs.dislikedIngredients ?? existing?.dislikedIngredients ?? []),
+    targetCalories: prefs.targetCalories ?? existing?.targetCalories ?? 2000,
+    targetProtein: prefs.targetProtein ?? existing?.targetProtein ?? 50,
+    targetCarbs: prefs.targetCarbs ?? existing?.targetCarbs ?? 250,
+    targetFat: prefs.targetFat ?? existing?.targetFat ?? 65,
+    mealsPerDay: prefs.mealsPerDay ?? existing?.mealsPerDay ?? 3,
+    includeSnacks: prefs.includeSnacks ?? existing?.includeSnacks ?? 1,
+  } as const;
 
   if (existing) {
-    await db
-      .update(userPreferences)
-      .set({
-        ...prefs,
-        updatedAt: new Date(),
-      })
-      .where(eq(userPreferences.userId, userId));
+    await pool.execute(
+      `UPDATE userPreferences SET allergies = ?, dietaryRestrictions = ?, nutritionalGoals = ?, preferredCuisines = ?, dislikedIngredients = ?, targetCalories = ?, targetProtein = ?, targetCarbs = ?, targetFat = ?, mealsPerDay = ?, includeSnacks = ?, updatedAt = NOW() WHERE userId = ?`,
+      [
+        payload.allergies,
+        payload.dietaryRestrictions,
+        payload.nutritionalGoals,
+        payload.preferredCuisines,
+        payload.dislikedIngredients,
+        payload.targetCalories,
+        payload.targetProtein,
+        payload.targetCarbs,
+        payload.targetFat,
+        payload.mealsPerDay,
+        payload.includeSnacks,
+        userId,
+      ]
+    );
   } else {
-    await db.insert(userPreferences).values({
-      userId,
-      ...prefs,
-    });
+    await pool.execute(
+      `INSERT INTO userPreferences (userId, allergies, dietaryRestrictions, nutritionalGoals, preferredCuisines, dislikedIngredients, targetCalories, targetProtein, targetCarbs, targetFat, mealsPerDay, includeSnacks, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        userId,
+        payload.allergies,
+        payload.dietaryRestrictions,
+        payload.nutritionalGoals,
+        payload.preferredCuisines,
+        payload.dislikedIngredients,
+        payload.targetCalories,
+        payload.targetProtein,
+        payload.targetCarbs,
+        payload.targetFat,
+        payload.mealsPerDay,
+        payload.includeSnacks,
+      ]
+    );
   }
 }
 
-// ==================== WEEKLY MENUS ====================
-
+// -------------------- WEEKLY MENUS --------------------
 export async function createWeeklyMenu(menu: InsertWeeklyMenu) {
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot create menu: database not available");
+  const pool = await getPool();
+  if (!pool) {
+    console.warn('[Database] Cannot create menu: database not available');
     return undefined;
   }
 
-  const result = await db.insert(weeklyMenus).values(menu);
-  return result;
+  const [res] = await pool.execute<any[]>(
+    `INSERT INTO weeklyMenus (userId, menuData, nutritionSummary, startDate, isActive, notes, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    [menu.userId, JSON.stringify(menu.menuData), JSON.stringify(menu.nutritionSummary), menu.startDate, menu.isActive ?? 0, menu.notes ?? null]
+  );
+
+  // mysql2 returns an OkPacket with insertId
+  const insertId = (res as any).insertId;
+  return insertId ? { id: insertId, ...menu } : res;
 }
 
 export async function getWeeklyMenu(menuId: number) {
-  const db = await getDb();
-  if (!db) return undefined;
-
-  const result = await db
-    .select()
-    .from(weeklyMenus)
-    .where(eq(weeklyMenus.id, menuId))
-    .limit(1);
-
-  return result.length > 0 ? result[0] : undefined;
+  const pool = await getPool();
+  if (!pool) return undefined;
+  const [rows] = await pool.execute<any[]>('SELECT * FROM weeklyMenus WHERE id = ? LIMIT 1', [menuId]);
+  if (!Array.isArray(rows) || rows.length === 0) return undefined;
+  const r = rows[0];
+  return {
+    ...r,
+    menuData: JSON.parse(r.menuData),
+    nutritionSummary: JSON.parse(r.nutritionSummary),
+    startDate: new Date(r.startDate),
+    createdAt: new Date(r.createdAt),
+    updatedAt: new Date(r.updatedAt),
+  } as WeeklyMenu;
 }
 
 export async function getUserWeeklyMenus(userId: number, limit: number = 10) {
-  const db = await getDb();
-  if (!db) return [];
-
-  const result = await db
-    .select()
-    .from(weeklyMenus)
-    .where(eq(weeklyMenus.userId, userId))
-    .orderBy(weeklyMenus.createdAt)
-    .limit(limit);
-
-  return result;
+  const pool = await getPool();
+  if (!pool) return [];
+  const [rows] = await pool.execute<any[]>('SELECT * FROM weeklyMenus WHERE userId = ? ORDER BY createdAt DESC LIMIT ?', [userId, limit]);
+  return (rows as any[]).map(r => ({
+    ...r,
+    menuData: JSON.parse(r.menuData),
+    nutritionSummary: JSON.parse(r.nutritionSummary),
+    startDate: new Date(r.startDate),
+    createdAt: new Date(r.createdAt),
+    updatedAt: new Date(r.updatedAt),
+  })) as WeeklyMenu[];
 }
 
 export async function getActiveWeeklyMenu(userId: number) {
-  const db = await getDb();
-  if (!db) return null;
-
-  const result = await db
-    .select()
-    .from(weeklyMenus)
-    .where(and(eq(weeklyMenus.userId, userId), eq(weeklyMenus.isActive, 1)))
-    .limit(1);
-
-  return result.length > 0 ? result[0] : null;
+  const pool = await getPool();
+  if (!pool) return null;
+  const [rows] = await pool.execute<any[]>('SELECT * FROM weeklyMenus WHERE userId = ? AND isActive = 1 LIMIT 1', [userId]);
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const r = rows[0];
+  return {
+    ...r,
+    menuData: JSON.parse(r.menuData),
+    nutritionSummary: JSON.parse(r.nutritionSummary),
+    startDate: new Date(r.startDate),
+    createdAt: new Date(r.createdAt),
+    updatedAt: new Date(r.updatedAt),
+  } as WeeklyMenu;
 }
 
 export async function updateWeeklyMenu(menuId: number, updates: Partial<InsertWeeklyMenu>) {
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot update menu: database not available");
+  const pool = await getPool();
+  if (!pool) {
+    console.warn('[Database] Cannot update menu: database not available');
     return;
   }
 
-  await db
-    .update(weeklyMenus)
-    .set({
-      ...updates,
-      updatedAt: new Date(),
-    })
-    .where(eq(weeklyMenus.id, menuId));
+  const sets: string[] = [];
+  const params: any[] = [];
+  if (updates.menuData) { sets.push('menuData = ?'); params.push(JSON.stringify(updates.menuData)); }
+  if (updates.nutritionSummary) { sets.push('nutritionSummary = ?'); params.push(JSON.stringify(updates.nutritionSummary)); }
+  if (updates.notes !== undefined) { sets.push('notes = ?'); params.push(updates.notes); }
+  if (sets.length === 0) return;
+  sets.push('updatedAt = NOW()');
+
+  const sql = `UPDATE weeklyMenus SET ${sets.join(', ')} WHERE id = ?`;
+  params.push(menuId);
+  await pool.execute(sql, params);
 }
 
 export async function setActiveWeeklyMenu(userId: number, menuId: number) {
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot set active menu: database not available");
+  const pool = await getPool();
+  if (!pool) {
+    console.warn('[Database] Cannot set active menu: database not available');
     return;
   }
-
-  // First, deactivate all other menus for this user
-  await db
-    .update(weeklyMenus)
-    .set({ isActive: 0 })
-    .where(eq(weeklyMenus.userId, userId));
-
-  // Then activate the selected menu
-  await db
-    .update(weeklyMenus)
-    .set({ isActive: 1 })
-    .where(eq(weeklyMenus.id, menuId));
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute('UPDATE weeklyMenus SET isActive = 0 WHERE userId = ?', [userId]);
+    await conn.execute('UPDATE weeklyMenus SET isActive = 1 WHERE id = ? AND userId = ?', [menuId, userId]);
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
 }
 
-// ==================== SHOPPING LISTS ====================
-
+// -------------------- SHOPPING LISTS --------------------
 export async function createShoppingList(list: InsertShoppingList) {
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot create shopping list: database not available");
+  const pool = await getPool();
+  if (!pool) {
+    console.warn('[Database] Cannot create shopping list: database not available');
     return undefined;
   }
-
-  const result = await db.insert(shoppingLists).values(list);
-  return result;
+  const [res] = await pool.execute<any[]>('INSERT INTO shoppingLists (weeklyMenuId, userId, items, isCompleted, createdAt, updatedAt) VALUES (?, ?, ?, ?, NOW(), NOW())', [list.weeklyMenuId, list.userId, JSON.stringify(list.items), list.isCompleted ?? 0]);
+  const insertId = (res as any).insertId;
+  return insertId ? { id: insertId, ...list } : res;
 }
 
 export async function getShoppingList(listId: number) {
-  const db = await getDb();
-  if (!db) return undefined;
-
-  const result = await db
-    .select()
-    .from(shoppingLists)
-    .where(eq(shoppingLists.id, listId))
-    .limit(1);
-
-  return result.length > 0 ? result[0] : undefined;
+  const pool = await getPool();
+  if (!pool) return undefined;
+  const [rows] = await pool.execute<any[]>('SELECT * FROM shoppingLists WHERE id = ? LIMIT 1', [listId]);
+  if (!Array.isArray(rows) || rows.length === 0) return undefined;
+  const r = rows[0];
+  return {
+    ...r,
+    items: JSON.parse(r.items),
+    createdAt: new Date(r.createdAt),
+    updatedAt: new Date(r.updatedAt),
+  } as ShoppingList;
 }
 
 export async function getShoppingListByMenuId(weeklyMenuId: number) {
-  const db = await getDb();
-  if (!db) return undefined;
-
-  const result = await db
-    .select()
-    .from(shoppingLists)
-    .where(eq(shoppingLists.weeklyMenuId, weeklyMenuId))
-    .limit(1);
-
-  return result.length > 0 ? result[0] : undefined;
+  const pool = await getPool();
+  if (!pool) return undefined;
+  const [rows] = await pool.execute<any[]>('SELECT * FROM shoppingLists WHERE weeklyMenuId = ? LIMIT 1', [weeklyMenuId]);
+  if (!Array.isArray(rows) || rows.length === 0) return undefined;
+  const r = rows[0];
+  return {
+    ...r,
+    items: JSON.parse(r.items),
+    createdAt: new Date(r.createdAt),
+    updatedAt: new Date(r.updatedAt),
+  } as ShoppingList;
 }
 
 export async function updateShoppingList(listId: number, updates: Partial<InsertShoppingList>) {
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot update shopping list: database not available");
+  const pool = await getPool();
+  if (!pool) {
+    console.warn('[Database] Cannot update shopping list: database not available');
     return;
   }
-
-  await db
-    .update(shoppingLists)
-    .set({
-      ...updates,
-      updatedAt: new Date(),
-    })
-    .where(eq(shoppingLists.id, listId));
+  const sets: string[] = [];
+  const params: any[] = [];
+  if (updates.items) { sets.push('items = ?'); params.push(JSON.stringify(updates.items)); }
+  if (updates.isCompleted !== undefined) { sets.push('isCompleted = ?'); params.push(updates.isCompleted); }
+  if (sets.length === 0) return;
+  sets.push('updatedAt = NOW()');
+  params.push(listId);
+  const sql = `UPDATE shoppingLists SET ${sets.join(', ')} WHERE id = ?`;
+  await pool.execute(sql, params);
 }
 
 export async function getUserShoppingLists(userId: number) {
-  const db = await getDb();
-  if (!db) return [];
+  const pool = await getPool();
+  if (!pool) return [];
 
-  const result = await db
-    .select()
-    .from(shoppingLists)
-    .where(eq(shoppingLists.userId, userId))
-    .orderBy(shoppingLists.createdAt);
-
-  return result;
+  const [rows] = await pool.execute<any[]>('SELECT * FROM shoppingLists WHERE userId = ? ORDER BY createdAt DESC', [userId]);
+  return (rows as any[]).map(r => ({
+    ...r,
+    items: JSON.parse(r.items),
+    createdAt: new Date(r.createdAt),
+    updatedAt: new Date(r.updatedAt),
+  })) as ShoppingList[];
 }

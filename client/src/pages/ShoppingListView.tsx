@@ -7,7 +7,7 @@ import { useNavigate } from "react-router-dom";
 import { Loader2, Download, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useState } from "react";
-import type { ShoppingItem, ShoppingList } from "../../../drizzle/schema";
+import type { ShoppingItem, ShoppingList } from "@shared";
 
 export default function ShoppingListView() {
   const { isAuthenticated } = useAuth();

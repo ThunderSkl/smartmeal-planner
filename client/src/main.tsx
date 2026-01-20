@@ -8,6 +8,9 @@ import App from "./App";
 import { getLoginUrl } from "./const";
 import "./index.css";
 
+// Optional Google OAuth provider (wrap only in browser when configured)
+import { GoogleOAuthProvider } from "@react-oauth/google";
+
 const queryClient = new QueryClient();
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {
@@ -52,10 +55,20 @@ const trpcClient = trpc.createClient({
   ],
 });
 
-createRoot(document.getElementById("root")!).render(
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
+const Root = (
   <trpc.Provider client={trpcClient} queryClient={queryClient}>
     <QueryClientProvider client={queryClient}>
       <App />
     </QueryClientProvider>
   </trpc.Provider>
+);
+
+createRoot(document.getElementById("root")!).render(
+  googleClientId ? (
+    <GoogleOAuthProvider clientId={googleClientId}>{Root}</GoogleOAuthProvider>
+  ) : (
+    Root
+  )
 );

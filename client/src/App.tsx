@@ -5,6 +5,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-d
 import ErrorBoundary from "./components/ErrorBoundary";
 import Home from "./pages/Home";
 import NotFound from "./pages/NotFound";
+import Login from "./pages/Login";
 import Preferences from "./pages/Preferences";
 import MenusView from "./pages/MenusView";
 import ShoppingListView from "./pages/ShoppingListView";
@@ -21,6 +22,7 @@ function App() {
           <Router>
             <Routes>
               <Route path="/" element={<Home />} />
+              <Route path="/login" element={<Login />} />
               <Route path="/preferences" element={<Preferences />} />
               <Route path="/menus" element={<MenusView />} />
               <Route path="/shopping" element={<ShoppingListView />} />

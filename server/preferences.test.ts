@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
-import type { User } from "../drizzle/schema";
+import type { User } from "@shared";
 
 function createAuthContext(userId: number = 1): { ctx: TrpcContext } {
   const user: User = {

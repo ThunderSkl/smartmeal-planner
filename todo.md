@@ -2,7 +2,7 @@
 
 ## Fase 1: Arquitectura de Base de Datos y Estructura del Proyecto
 - [x] Diseñar esquema de base de datos (usuarios, preferencias, menús, ingredientes)
-- [x] Crear tablas en drizzle/schema.ts
+- [x] Crear tablas en schema (migrated from ORM artifacts)
 - [x] Definir tipos TypeScript para entidades principales
 - [x] Crear helpers de base de datos en server/db.ts
 

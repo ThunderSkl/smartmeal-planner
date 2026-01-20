@@ -2,7 +2,7 @@ import { protectedProcedure, router } from "./_core/trpc";
 import { z } from "zod";
 import { generateWeeklyMenu, generateShoppingList } from "./menuGenerator";
 import { getUserPreferences, createWeeklyMenu, createShoppingList } from "./db";
-import type { DayMenu, NutritionSummary, ShoppingItem } from "../drizzle/schema";
+import type { DayMenu, NutritionSummary, ShoppingItem } from "@shared";
 
 export const menuRouter = router({
   generate: protectedProcedure

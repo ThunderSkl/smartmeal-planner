@@ -1,5 +1,5 @@
 import { ENV } from "./_core/env";
-import type { DayMenu, Meal, NutritionSummary, UserPreferences } from "../drizzle/schema";
+import type { DayMenu, Meal, NutritionSummary, UserPreferences } from "@shared";
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
