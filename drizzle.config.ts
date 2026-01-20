@@ -1,15 +1,6 @@
-import { defineConfig } from "drizzle-kit";
+// drizzle.config.ts — archived
+// The project no longer uses Drizzle at runtime. This config is kept only for
+// reference/history. If you need to run Drizzle CLI against the SQL files,
+// re-create a minimal config or restore Drizzle packages.
 
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  throw new Error("DATABASE_URL is required to run drizzle commands");
-}
-
-export default defineConfig({
-  schema: "./drizzle/schema.ts",
-  out: "./drizzle",
-  dialect: "mysql",
-  dbCredentials: {
-    url: connectionString,
-  },
-});
+export default {} as const;
